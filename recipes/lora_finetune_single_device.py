@@ -700,7 +700,8 @@ class LoRAFinetuneRecipeSingleDevice(FTRecipeInterface):
                     if (idx + 1) % self._gradient_accumulation_steps == 0:
                         # Normalize gradient by total number of samples (batch size)
                         batch_size = next(iter(batch.values())).size(0)
-                        training.scale_grads(self._model, 1 / batch_size)
+                        scaling_factor = torch.tensor(1 / batch_size, device=self._device)
+                        training.scale_grads(self._model, scaling_factor)
 
                         # Optional gradient clipping
                         if self._clip_grad_norm is not None:
