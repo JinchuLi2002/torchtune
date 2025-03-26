@@ -699,7 +699,8 @@ class LoRAFinetuneRecipeSingleDevice(FTRecipeInterface):
                     # Optimizer step (unchanged gradient accumulation logic)
                     if (idx + 1) % self._gradient_accumulation_steps == 0:
                         # Normalize gradient by total number of samples (batch size)
-                        training.scale_grads(self._model, 1 / num_samples)
+                        batch_size = next(iter(batch.values())).size(0)
+                        training.scale_grads(self._model, 1 / batch_size)
 
                         # Optional gradient clipping
                         if self._clip_grad_norm is not None:
