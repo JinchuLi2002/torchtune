@@ -292,14 +292,14 @@ class LoRAFinetuneRecipeSingleDevice(FTRecipeInterface):
             ),
         )
 
-        # initialize loss
-        self._loss_fn = config.instantiate(cfg.loss)
-        if self._compile:
-            self._loss_fn = training.compile_loss(self._loss_fn)
+        # # initialize loss
+        # self._loss_fn = config.instantiate(cfg.loss)
+        # if self._compile:
+        #     self._loss_fn = training.compile_loss(self._loss_fn)
 
-        if self._loss_fn.__class__.__name__ == "CEWithChunkedOutputLoss":
-            # set num_output_chunks for model
-            self._model.set_num_output_chunks(self._loss_fn.num_output_chunks)
+        # if self._loss_fn.__class__.__name__ == "CEWithChunkedOutputLoss":
+        #     # set num_output_chunks for model
+        #     self._model.set_num_output_chunks(self._loss_fn.num_output_chunks)
 
         log.info("Loss is initialized.")
 
@@ -347,10 +347,10 @@ class LoRAFinetuneRecipeSingleDevice(FTRecipeInterface):
         # if cfg is missing profiler key or if `cfg.profiler.enabled = False
         self._profiler = self._setup_profiler(cfg.get(PROFILER_KEY, None))
 
-        # Used to ignore labels for loss computation
-        self.ignore_labels_cache = torch.full(
-            (cfg.batch_size, 1), self._loss_fn.ignore_index, device=self._device
-        )
+        # # Used to ignore labels for loss computation
+        # self.ignore_labels_cache = torch.full(
+        #     (cfg.batch_size, 1), self._loss_fn.ignore_index, device=self._device
+        # )
 
     def _setup_profiler(
         self, cfg_profiler: Optional[DictConfig] = None
@@ -555,7 +555,7 @@ class LoRAFinetuneRecipeSingleDevice(FTRecipeInterface):
                 partial(
                     collate_fn,
                     padding_idx=self._tokenizer.pad_id,
-                    ignore_idx=self._loss_fn.ignore_index,
+                    #ignore_idx=self._loss_fn.ignore_index,
                 )
                 if not packed
                 else padded_collate_packed
@@ -659,25 +659,25 @@ class LoRAFinetuneRecipeSingleDevice(FTRecipeInterface):
 
     def train(self) -> None:
         """
-        The core training loop.
+        The core training loop adapted for numeric regression (RAFT).
         """
 
         if self._compile:
             log.info(
-                "NOTE: torch.compile is enabled and model is compiled in first forward. Expect a relatively slow first iteration."
+                "NOTE: torch.compile is enabled; expect a relatively slow first iteration."
             )
 
-        # Initialize tokens count and running loss (for grad accumulation)
+        # Initialize timer and running loss
         t0 = time.perf_counter()
         running_loss = 0
-        num_tokens = 0
+        num_samples = 0  # RAFT is per-sample rather than per-token
 
         with self._profiler as prof:
-            # self.epochs_run should be non-zero when we're resuming from a checkpoint
             for curr_epoch in range(self.epochs_run, self.total_epochs):
                 pbar = tqdm(total=self._steps_per_epoch)
+                
                 for idx, batch in enumerate(self._dataloader):
-                    # Start tracking CUDA memory for active steps for just the first epoch
+                    # CUDA memory profiling (unchanged)
                     if (
                         curr_epoch == 0
                         and self.profiler_profile_memory
@@ -688,46 +688,46 @@ class LoRAFinetuneRecipeSingleDevice(FTRecipeInterface):
 
                     utils.batch_to_device(batch, self._device)
 
-                    # Calculate the number of unmasked tokens in the current batch
-                    # and increment the total number of tokens seen in the step
-                    current_num_tokens = (
-                        batch["labels"] != self._loss_fn.ignore_index
-                    ).sum()
-                    num_tokens += current_num_tokens
+                    # Compute loss (RAFT numeric loss is per-sample)
+                    current_loss = self._loss_step(batch)
+                    batch_size = batch["tokens"].size(0)  # RAFT loss is batch-sized
+                    running_loss += current_loss.item() * batch_size
+                    num_samples += batch_size
 
-                    # Loss is normalized by default so we multiply by the number of tokens
-                    # This way we can normalize by the total number of tokens if we're accumulating gradients
-                    current_loss = self._loss_step(batch) * current_num_tokens
-                    running_loss += current_loss
                     current_loss.backward()
 
-                    # Step with optimizer
+                    # Optimizer step (unchanged gradient accumulation logic)
                     if (idx + 1) % self._gradient_accumulation_steps == 0:
-                        training.scale_grads(self._model, 1 / num_tokens)
+                        # Normalize gradient by total number of samples (batch size)
+                        training.scale_grads(self._model, 1 / num_samples)
+
+                        # Optional gradient clipping
                         if self._clip_grad_norm is not None:
                             grad_norm = torch.nn.utils.clip_grad_norm_(
                                 self._model.parameters(),
                                 max_norm=float(self._clip_grad_norm),
                             )
+
+                        # Optimizer & scheduler step
                         self._optimizer.step()
                         self._optimizer.zero_grad(set_to_none=True)
                         self._lr_scheduler.step()
-                        # Update the number of steps when the weights are updated
                         self.global_step += 1
 
-                        loss_to_log = running_loss.item() / num_tokens
+                        # Calculate mean loss per sample
+                        loss_to_log = running_loss / num_samples
                         pbar.update(1)
                         pbar.set_description(
-                            f"{curr_epoch + 1}|{self.global_step}|Loss: {loss_to_log}"
+                            f"{curr_epoch + 1}|{self.global_step}|Loss: {loss_to_log:.4f}"
                         )
 
-                        # Log per-step metrics
+                        # Logging
                         if self.global_step % self._log_every_n_steps == 0:
                             time_per_step = time.perf_counter() - t0
                             log_dict = {
                                 "loss": loss_to_log,
                                 "lr": self._optimizer.param_groups[0]["lr"],
-                                "tokens_per_second_per_gpu": num_tokens / time_per_step,
+                                "samples_per_second_per_gpu": num_samples / time_per_step,
                             }
                             if (
                                 self._device.type != "cpu"
@@ -743,26 +743,22 @@ class LoRAFinetuneRecipeSingleDevice(FTRecipeInterface):
                                 step=self.global_step,
                             )
 
-                        # Reset running stats for the next step
+                        # Reset counters for next accumulation step
                         running_loss = 0
-                        num_tokens = 0
+                        num_samples = 0
                         t0 = time.perf_counter()
 
-                    # Stop tracking CUDA memory now that active steps are complete
+                    # Stop tracking CUDA memory after active steps
                     if (
                         curr_epoch == 0
                         and self.profiler_profile_memory
-                        and idx
-                        == self.profiler_wait_steps
+                        and idx == self.profiler_wait_steps
                         + self.profiler_warmup_steps
                         + self.profiler_active_steps
                         and self._device.type == "cuda"
                     ):
                         torch.cuda.memory._record_memory_history(enabled=None)
 
-                    # Step the profiler
-                    # Note we are stepping each batch, which might not include optimizer step in the trace
-                    # if the schedule cycle doesn't align with gradient accumulation.
                     prof.step()
 
                     if (
@@ -779,6 +775,129 @@ class LoRAFinetuneRecipeSingleDevice(FTRecipeInterface):
                         time.perf_counter() - start_save_checkpoint
                     )
                 )
+
+    # def train(self) -> None:
+    #     """
+    #     The core training loop.
+    #     """
+
+    #     if self._compile:
+    #         log.info(
+    #             "NOTE: torch.compile is enabled and model is compiled in first forward. Expect a relatively slow first iteration."
+    #         )
+
+    #     # Initialize tokens count and running loss (for grad accumulation)
+    #     t0 = time.perf_counter()
+    #     running_loss = 0
+    #     num_tokens = 0
+
+    #     with self._profiler as prof:
+    #         # self.epochs_run should be non-zero when we're resuming from a checkpoint
+    #         for curr_epoch in range(self.epochs_run, self.total_epochs):
+    #             pbar = tqdm(total=self._steps_per_epoch)
+    #             for idx, batch in enumerate(self._dataloader):
+    #                 # Start tracking CUDA memory for active steps for just the first epoch
+    #                 if (
+    #                     curr_epoch == 0
+    #                     and self.profiler_profile_memory
+    #                     and idx == self.profiler_wait_steps + self.profiler_warmup_steps
+    #                     and self._device.type == "cuda"
+    #                 ):
+    #                     torch.cuda.memory._record_memory_history()
+
+    #                 utils.batch_to_device(batch, self._device)
+
+    #                 # Calculate the number of unmasked tokens in the current batch
+    #                 # and increment the total number of tokens seen in the step
+    #                 current_num_tokens = (
+    #                     batch["labels"] != self._loss_fn.ignore_index
+    #                 ).sum()
+    #                 num_tokens += current_num_tokens
+
+    #                 # Loss is normalized by default so we multiply by the number of tokens
+    #                 # This way we can normalize by the total number of tokens if we're accumulating gradients
+    #                 current_loss = self._loss_step(batch) * current_num_tokens
+    #                 running_loss += current_loss
+    #                 current_loss.backward()
+
+    #                 # Step with optimizer
+    #                 if (idx + 1) % self._gradient_accumulation_steps == 0:
+    #                     training.scale_grads(self._model, 1 / num_tokens)
+    #                     if self._clip_grad_norm is not None:
+    #                         grad_norm = torch.nn.utils.clip_grad_norm_(
+    #                             self._model.parameters(),
+    #                             max_norm=float(self._clip_grad_norm),
+    #                         )
+    #                     self._optimizer.step()
+    #                     self._optimizer.zero_grad(set_to_none=True)
+    #                     self._lr_scheduler.step()
+    #                     # Update the number of steps when the weights are updated
+    #                     self.global_step += 1
+
+    #                     loss_to_log = running_loss.item() / num_tokens
+    #                     pbar.update(1)
+    #                     pbar.set_description(
+    #                         f"{curr_epoch + 1}|{self.global_step}|Loss: {loss_to_log}"
+    #                     )
+
+    #                     # Log per-step metrics
+    #                     if self.global_step % self._log_every_n_steps == 0:
+    #                         time_per_step = time.perf_counter() - t0
+    #                         log_dict = {
+    #                             "loss": loss_to_log,
+    #                             "lr": self._optimizer.param_groups[0]["lr"],
+    #                             "tokens_per_second_per_gpu": num_tokens / time_per_step,
+    #                         }
+    #                         if (
+    #                             self._device.type != "cpu"
+    #                             and self._log_peak_memory_stats
+    #                         ):
+    #                             log_dict.update(
+    #                                 training.get_memory_stats(device=self._device)
+    #                             )
+    #                         if self._clip_grad_norm is not None:
+    #                             log_dict.update({"grad_norm": grad_norm})
+    #                         self._metric_logger.log_dict(
+    #                             log_dict,
+    #                             step=self.global_step,
+    #                         )
+
+    #                     # Reset running stats for the next step
+    #                     running_loss = 0
+    #                     num_tokens = 0
+    #                     t0 = time.perf_counter()
+
+    #                 # Stop tracking CUDA memory now that active steps are complete
+    #                 if (
+    #                     curr_epoch == 0
+    #                     and self.profiler_profile_memory
+    #                     and idx
+    #                     == self.profiler_wait_steps
+    #                     + self.profiler_warmup_steps
+    #                     + self.profiler_active_steps
+    #                     and self._device.type == "cuda"
+    #                 ):
+    #                     torch.cuda.memory._record_memory_history(enabled=None)
+
+    #                 # Step the profiler
+    #                 # Note we are stepping each batch, which might not include optimizer step in the trace
+    #                 # if the schedule cycle doesn't align with gradient accumulation.
+    #                 prof.step()
+
+    #                 if (
+    #                     (idx + 1) // self._gradient_accumulation_steps
+    #                 ) == self.max_steps_per_epoch:
+    #                     break
+
+    #             self.epochs_run += 1
+    #             start_save_checkpoint = time.perf_counter()
+    #             log.info("Starting checkpoint save...")
+    #             self.save_checkpoint(epoch=curr_epoch)
+    #             log.info(
+    #                 "Checkpoint saved in {:.2f} seconds.".format(
+    #                     time.perf_counter() - start_save_checkpoint
+    #                 )
+    #             )
 
     def cleanup(self) -> None:
         self._metric_logger.close()
