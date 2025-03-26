@@ -634,8 +634,8 @@ class LoRAFinetuneRecipeSingleDevice(FTRecipeInterface):
         )
 
     def _loss_step(self, batch: Dict[str, torch.Tensor]) -> torch.Tensor:
-        # CRITICAL CHANGE HERE:
-        labels = batch.pop("numeric_label")  # <- This is numeric truth (0-999)
+        numeric_labels = batch.pop("numeric_label")
+        labels = batch.pop("labels")  # remove labels as well, as it's not used in forward()
 
         with self.activations_handling_ctx:
             logits = self._model(**batch)
@@ -652,9 +652,10 @@ class LoRAFinetuneRecipeSingleDevice(FTRecipeInterface):
         numeric_values = torch.arange(1000, device=self._device)
         preds_numeric = torch.sum(numeric_probs * numeric_values, dim=-1)
 
-        loss = F.mse_loss(preds_numeric, labels.float())
+        loss = F.mse_loss(preds_numeric, numeric_labels.float())
 
         return loss
+
 
     def train(self) -> None:
         """
