@@ -642,7 +642,7 @@ class LoRAFinetuneRecipeSingleDevice(FTRecipeInterface):
 
         numeric_tokens = [str(i) for i in range(1000)]
         numeric_token_ids = torch.tensor(
-            self._tokenizer.convert_tokens_to_ids(numeric_tokens), 
+            [self._tokenizer.encode(token, add_bos=False, add_eos=False)[0] for token in numeric_tokens],
             device=self._device
         )
 
