@@ -19,7 +19,6 @@ from torch import nn
 from torch.optim import Optimizer
 from torchdata.stateful_dataloader import StatefulDataLoader
 from torchtune import config, modules, training, utils
-import torch.nn.functional as F
 from torchtune.config._utils import _get_component_from_path
 from torchtune.data import padded_collate_packed
 from torchtune.datasets import ConcatDataset
@@ -634,26 +633,26 @@ class LoRAFinetuneRecipeSingleDevice(FTRecipeInterface):
         )
 
     def _loss_step(self, batch: Dict[str, torch.Tensor]) -> torch.Tensor:
-        # Extract numeric ground-truth from labels (assuming labels are numeric, single token at end)
-        labels = batch.pop("labels")[:, -1]
-
+        # Shape [b, s], needed for the loss not the model
+        labels = batch.pop("labels")
+        # run model
         with self.activations_handling_ctx:
             logits = self._model(**batch)
 
-        numeric_tokens = [str(i) for i in range(1000)]
-        numeric_token_ids = torch.tensor(
-            self._tokenizer.convert_tokens_to_ids(numeric_tokens), 
-            device=self._device
+        # Shift labels to compute loss
+        # equivalent to doing labels[..., 1:] and logits[..., :-1, :]
+        # But this way we dont need to slice the logits. We just add an ignore index to labels.
+        labels = torch.hstack(
+            (labels[..., 1:], self.ignore_labels_cache[: labels.shape[0]])
         )
+        if not isinstance(logits, list):
+            labels = labels.reshape(-1)
+            logits = logits.reshape(-1, logits.size(-1))
 
-        numeric_logits = logits[:, -1, numeric_token_ids]
-        numeric_probs = F.softmax(numeric_logits, dim=-1)
+        loss = self._loss_fn(logits, labels)
 
-        # This line needs the numeric VALUES 0–999, not token IDs
-        numeric_values = torch.arange(1000, device=self._device)
-        preds_numeric = torch.sum(numeric_probs * numeric_values, dim=-1)
-
-        loss = F.mse_loss(preds_numeric, labels.float())
+        # free logits otherwise it peaks backward memory
+        del logits
 
         return loss
 
