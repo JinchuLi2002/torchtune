@@ -634,8 +634,8 @@ class LoRAFinetuneRecipeSingleDevice(FTRecipeInterface):
         )
 
     def _loss_step(self, batch: Dict[str, torch.Tensor]) -> torch.Tensor:
-        # Extract numeric ground-truth from labels (assuming labels are numeric, single token at end)
-        labels = batch.pop("labels")[:, -1]
+        # CRITICAL CHANGE HERE:
+        labels = batch.pop("numeric_label")  # <- This is numeric truth (0-999)
 
         with self.activations_handling_ctx:
             logits = self._model(**batch)
@@ -649,7 +649,6 @@ class LoRAFinetuneRecipeSingleDevice(FTRecipeInterface):
         numeric_logits = logits[:, -1, numeric_token_ids]
         numeric_probs = F.softmax(numeric_logits, dim=-1)
 
-        # This line needs the numeric VALUES 0–999, not token IDs
         numeric_values = torch.arange(1000, device=self._device)
         preds_numeric = torch.sum(numeric_probs * numeric_values, dim=-1)
 
