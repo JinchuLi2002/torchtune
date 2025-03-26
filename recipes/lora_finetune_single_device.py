@@ -635,7 +635,6 @@ class LoRAFinetuneRecipeSingleDevice(FTRecipeInterface):
 
     def _loss_step(self, batch: Dict[str, torch.Tensor]) -> torch.Tensor:
         # CRITICAL CHANGE HERE:
-        print(batch)
         labels = batch.pop("numeric_label")  # <- This is numeric truth (0-999)
 
         with self.activations_handling_ctx:
