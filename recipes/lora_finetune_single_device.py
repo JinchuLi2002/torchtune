@@ -633,27 +633,62 @@ class LoRAFinetuneRecipeSingleDevice(FTRecipeInterface):
             adapter_only=self._save_adapter_weights_only,
         )
 
+    # def _loss_step(self, batch: Dict[str, torch.Tensor]) -> torch.Tensor:
+    #     numeric_labels = batch.pop("numeric_label")
+    #     labels = batch.pop("labels")  # remove labels as well, as it's not used in forward()
+
+    #     with self.activations_handling_ctx:
+    #         logits = self._model(**batch)
+
+    #     numeric_tokens = [str(i) for i in range(1000)]
+    #     numeric_token_ids = torch.tensor(
+    #         [self._tokenizer.encode(token, add_bos=False, add_eos=False)[0] for token in numeric_tokens],
+    #         device=self._device
+    #     )
+
+    #     numeric_logits = logits[:, -1, numeric_token_ids]
+    #     numeric_probs = F.softmax(numeric_logits, dim=-1)
+
+    #     numeric_values = torch.arange(1000, device=self._device)
+    #     preds_numeric = torch.sum(numeric_probs * numeric_values, dim=-1)
+
+    #     loss = F.mse_loss(preds_numeric, numeric_labels.float())
+
+    #     return loss
     def _loss_step(self, batch: Dict[str, torch.Tensor]) -> torch.Tensor:
         numeric_labels = batch.pop("numeric_label")
-        labels = batch.pop("labels")  # remove labels as well, as it's not used in forward()
+        labels = batch.pop("labels")
 
         with self.activations_handling_ctx:
             logits = self._model(**batch)
 
+        # Numeric tokens
         numeric_tokens = [str(i) for i in range(1000)]
         numeric_token_ids = torch.tensor(
             [self._tokenizer.encode(token, add_bos=False, add_eos=False)[0] for token in numeric_tokens],
             device=self._device
         )
+        numeric_values = torch.arange(1000, device=self._device)
 
+        # Probabilities over numeric tokens
         numeric_logits = logits[:, -1, numeric_token_ids]
         numeric_probs = F.softmax(numeric_logits, dim=-1)
-
-        numeric_values = torch.arange(1000, device=self._device)
         preds_numeric = torch.sum(numeric_probs * numeric_values, dim=-1)
 
-        loss = F.mse_loss(preds_numeric, numeric_labels.float())
+        # MSE Loss
+        mse = F.mse_loss(preds_numeric, numeric_labels.float())
 
+        # (1) Penalize if top token is not numeric
+        full_probs = F.softmax(logits[:, -1, :], dim=-1)
+        top_token = torch.argmax(full_probs, dim=-1)
+        is_numeric = torch.isin(top_token, numeric_token_ids)
+        non_numeric_penalty = (~is_numeric).float().mean()
+
+        # (2) Penalize high entropy (flat distribution)
+        entropy = -torch.sum(numeric_probs * numeric_probs.log(), dim=-1).mean()
+
+        # Combine all
+        loss = mse + 0.5 * non_numeric_penalty + 0.1 * entropy
         return loss
 
 
