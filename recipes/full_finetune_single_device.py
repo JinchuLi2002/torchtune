@@ -685,6 +685,7 @@ class FullFinetuneRecipeSingleDevice(FTRecipeInterface):
         # Combine all
         #loss = mse + 0.5 * non_numeric_penalty + 0.1 * entropy
         loss = mse
+        print(f"[DEBUG] preds_numeric: {preds_numeric.tolist()} | target: {numeric_labels.tolist()} | mse: {mse.item():.4f}")
         return loss
     # def _loss_step(self, batch: Dict[str, torch.Tensor]) -> torch.Tensor:
     #     numeric_labels = batch.pop("numeric_label")
