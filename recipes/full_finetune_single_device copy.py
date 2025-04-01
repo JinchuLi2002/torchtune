@@ -16,7 +16,7 @@ from omegaconf import DictConfig, ListConfig
 from torch import nn
 from torch.optim import Optimizer
 from torchdata.stateful_dataloader import StatefulDataLoader
-import torch.nn.functional as F
+
 from torchtune import config, modules, training, utils
 from torchtune.config._utils import _get_component_from_path
 from torchtune.data import padded_collate_packed
@@ -287,17 +287,17 @@ class FullFinetuneRecipeSingleDevice(FTRecipeInterface):
             ),
         )
 
-        # # initialize loss
-        # self._loss_fn = config.instantiate(cfg.loss)
+        # initialize loss
+        self._loss_fn = config.instantiate(cfg.loss)
 
-        # if self._compile:
-        #     training.compile_loss(self._loss_fn)
+        if self._compile:
+            training.compile_loss(self._loss_fn)
 
-        # if self._loss_fn.__class__.__name__ == "CEWithChunkedOutputLoss":
-        #     # set num_output_chunks for model
-        #     self._model.set_num_output_chunks(self._loss_fn.num_output_chunks)
+        if self._loss_fn.__class__.__name__ == "CEWithChunkedOutputLoss":
+            # set num_output_chunks for model
+            self._model.set_num_output_chunks(self._loss_fn.num_output_chunks)
 
-        log.info("Loss (CE) skipped, not initialized.")
+        log.info("Loss is initialized.")
 
         # sampler and dataloader depend on the tokenizer and loss_fn and should be
         # setup after both of these are initialized
@@ -342,10 +342,10 @@ class FullFinetuneRecipeSingleDevice(FTRecipeInterface):
         # if cfg is missing profiler key or if `cfg.profiler.enabled = False`
         self._profiler = self._setup_profiler(cfg.get(PROFILER_KEY, None))
 
-        # # Used to ignore labels for loss computation
-        # self.ignore_labels_cache = torch.full(
-        #     (cfg.batch_size, 1), self._loss_fn.ignore_index, device=self._device
-        # )
+        # Used to ignore labels for loss computation
+        self.ignore_labels_cache = torch.full(
+            (cfg.batch_size, 1), self._loss_fn.ignore_index, device=self._device
+        )
 
     def _setup_profiler(
         self, cfg_profiler: Optional[DictConfig] = None
@@ -584,7 +584,7 @@ class FullFinetuneRecipeSingleDevice(FTRecipeInterface):
                 partial(
                     collate_fn,
                     padding_idx=self._tokenizer.pad_id,
-                    #ignore_idx=self._loss_fn.ignore_index,
+                    ignore_idx=self._loss_fn.ignore_index,
                 )
                 if not packed
                 else padded_collate_packed
@@ -626,63 +626,28 @@ class FullFinetuneRecipeSingleDevice(FTRecipeInterface):
             intermediate_checkpoint=(epoch + 1 < self.total_epochs),
         )
 
-    # def _loss_step(self, batch: Dict[str, torch.Tensor]) -> torch.Tensor:
-    #     # Shape [b, s], needed for the loss not the model
-    #     labels = batch.pop("labels")
-
-    #     with self.activations_handling_ctx:
-    #         logits = self._model(**batch)
-
-    #     # Shift labels to compute loss
-    #     # equivalent to doing labels[..., 1:] and logits[..., :-1, :]
-    #     # But this way we dont need to slice the logits. We just add an ignore index to labels.
-    #     labels = torch.hstack(
-    #         (labels[..., 1:], self.ignore_labels_cache[: labels.shape[0]])
-    #     )
-    #     if not isinstance(logits, list):
-    #         labels = labels.reshape(-1)
-    #         logits = logits.reshape(-1, logits.size(-1))
-
-    #     # Compute loss
-    #     loss = self._loss_fn(logits, labels)
-    #     # free logits otherwise it peaks backward memory
-    #     del logits
-
-    #     return loss
     def _loss_step(self, batch: Dict[str, torch.Tensor]) -> torch.Tensor:
-        numeric_labels = batch.pop("numeric_label")
+        # Shape [b, s], needed for the loss not the model
         labels = batch.pop("labels")
 
         with self.activations_handling_ctx:
             logits = self._model(**batch)
 
-        # Numeric tokens
-        numeric_tokens = [str(i) for i in range(1000)]
-        numeric_token_ids = torch.tensor(
-            [self._tokenizer.encode(token, add_bos=False, add_eos=False)[0] for token in numeric_tokens],
-            device=self._device
+        # Shift labels to compute loss
+        # equivalent to doing labels[..., 1:] and logits[..., :-1, :]
+        # But this way we dont need to slice the logits. We just add an ignore index to labels.
+        labels = torch.hstack(
+            (labels[..., 1:], self.ignore_labels_cache[: labels.shape[0]])
         )
-        numeric_values = torch.arange(1000, device=self._device)
+        if not isinstance(logits, list):
+            labels = labels.reshape(-1)
+            logits = logits.reshape(-1, logits.size(-1))
 
-        # Probabilities over numeric tokens
-        numeric_logits = logits[:, -1, numeric_token_ids]
-        numeric_probs = F.softmax(numeric_logits, dim=-1)
-        preds_numeric = torch.sum(numeric_probs * numeric_values, dim=-1)
+        # Compute loss
+        loss = self._loss_fn(logits, labels)
+        # free logits otherwise it peaks backward memory
+        del logits
 
-        # MSE Loss
-        mse = F.mse_loss(preds_numeric, numeric_labels.float())
-
-        # (1) Penalize if top token is not numeric
-        full_probs = F.softmax(logits[:, -1, :], dim=-1)
-        top_token = torch.argmax(full_probs, dim=-1)
-        is_numeric = torch.isin(top_token, numeric_token_ids)
-        non_numeric_penalty = (~is_numeric).float().mean()
-
-        # (2) Penalize high entropy (flat distribution)
-        entropy = -torch.sum(numeric_probs * numeric_probs.log(), dim=-1).mean()
-
-        # Combine all
-        loss = mse + 0.5 * non_numeric_penalty + 0.1 * entropy
         return loss
 
     def train(self) -> None:
@@ -701,8 +666,7 @@ class FullFinetuneRecipeSingleDevice(FTRecipeInterface):
         # Initialize tokens count and running loss (for grad accumulation)
         t0 = time.perf_counter()
         running_loss = 0
-        #num_tokens = 0
-        num_samples = 0
+        num_tokens = 0
 
         self._profiler.start()
         # self.epochs_run should be non-zero when we're resuming from a checkpoint
@@ -721,28 +685,21 @@ class FullFinetuneRecipeSingleDevice(FTRecipeInterface):
 
                 # Calculate the number of unmasked tokens in the current batch
                 # and increment the total number of tokens seen in the step
-                # current_num_tokens = (
-                #     batch["labels"] != self._loss_fn.ignore_index
-                # ).sum()
-                # num_tokens += current_num_tokens
+                current_num_tokens = (
+                    batch["labels"] != self._loss_fn.ignore_index
+                ).sum()
+                num_tokens += current_num_tokens
 
-                # # Loss is normalized by default so we multiply by the number of tokens
-                # # This way we can normalize by the total number of tokens if we're accumulating gradients
-                # current_loss = self._loss_step(batch) * current_num_tokens
-                # running_loss += current_loss
-                current_loss = self._loss_step(batch)
-                batch_size = batch["tokens"].size(0)  # RAFT loss is batch-sized
-                running_loss += current_loss.item() * batch_size
-                num_samples += batch_size
+                # Loss is normalized by default so we multiply by the number of tokens
+                # This way we can normalize by the total number of tokens if we're accumulating gradients
+                current_loss = self._loss_step(batch) * current_num_tokens
+                running_loss += current_loss
                 current_loss.backward()
 
                 # Step with optimizer
                 if (idx + 1) % self._gradient_accumulation_steps == 0:
                     if not self._optimizer_in_bwd:
-                        #training.scale_grads(self._model, 1 / num_tokens)
-                        batch_size = next(iter(batch.values())).size(0)
-                        scaling_factor = torch.tensor(1 / batch_size, device=self._device)
-                        training.scale_grads(self._model, scaling_factor)
+                        training.scale_grads(self._model, 1 / num_tokens)
                         if self._clip_grad_norm is not None:
                             grad_norm = torch.nn.utils.clip_grad_norm_(
                                 self._model.parameters(),
@@ -756,11 +713,10 @@ class FullFinetuneRecipeSingleDevice(FTRecipeInterface):
                         self._lr_scheduler.step()
                     self.global_step += 1
 
-                    #loss_to_log = running_loss.item() / num_tokens
-                    loss_to_log = running_loss / num_samples
+                    loss_to_log = running_loss.item() / num_tokens
                     pbar.update(1)
                     pbar.set_description(
-                        f"{curr_epoch + 1}|{self.global_step}|Loss: {loss_to_log:.4f}| Batch_loss: {current_loss.item():.4f}"
+                        f"{curr_epoch + 1}|{self.global_step}|Loss: {loss_to_log}"
                     )
 
                     # Log per-step metrics
@@ -777,8 +733,7 @@ class FullFinetuneRecipeSingleDevice(FTRecipeInterface):
                                     else self._optim_ckpt_wrapper
                                 ),
                             ),
-                            # "tokens_per_second_per_gpu": num_tokens / time_per_step,
-                            "samples_per_second_per_gpu": num_samples / time_per_step,
+                            "tokens_per_second_per_gpu": num_tokens / time_per_step,
                         }
                         if self._device.type != "cpu" and self._log_peak_memory_stats:
                             log_dict.update(
@@ -793,7 +748,7 @@ class FullFinetuneRecipeSingleDevice(FTRecipeInterface):
 
                     # Reset running stats for the next step
                     running_loss = 0
-                    num_samples = 0
+                    num_tokens = 0
                     t0 = time.perf_counter()
 
                 # Stop tracking CUDA memory now that active steps are complete
