@@ -666,6 +666,7 @@ class FullFinetuneRecipeSingleDevice(FTRecipeInterface):
 
         # Probabilities over numeric tokens
         numeric_logits = logits[:, -1, numeric_token_ids]
+        numeric_logits = torch.clamp(numeric_logits, min=-50, max=50)
         numeric_probs = F.softmax(numeric_logits, dim=-1)
         preds_numeric = torch.sum(numeric_probs * numeric_values, dim=-1)
 
