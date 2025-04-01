@@ -687,6 +687,15 @@ class LoRAFinetuneRecipeSingleDevice(FTRecipeInterface):
         # (2) Penalize high entropy (flat distribution)
         entropy = -torch.sum(numeric_probs * numeric_probs.log(), dim=-1).mean()
 
+        full_logits = logits[:, -1, :]
+        full_probs = F.softmax(full_logits, dim=-1)
+        top_token_ids = torch.argmax(full_probs, dim=-1)
+
+        # Decode top tokens
+        top_tokens_str = [self._tokenizer.decode([tid.item()]).strip() for tid in top_token_ids]
+
+        print(f"[DEBUG] preds_numeric: {preds_numeric.tolist()} | target: {numeric_labels.tolist()} | mse: {mse.item():.4f}")
+        print(f"[DEBUG] top token ids: {top_token_ids.tolist()} | decoded: {top_tokens_str}")
         # Combine all
         loss = mse + 0.5 * non_numeric_penalty + 0.1 * entropy
         return loss
