@@ -657,13 +657,20 @@ class FullFinetuneRecipeSingleDevice(FTRecipeInterface):
             logits = self._model(**batch)
 
         # Numeric tokens
-        numeric_tokens = [str(i) for i in range(1000)]
-        numeric_token_ids = torch.tensor(
-            [self._tokenizer.encode(token, add_bos=False, add_eos=False)[0] for token in numeric_tokens],
-            device=self._device
-        )
-        numeric_values = torch.arange(1000, device=self._device)
-
+        numeric_token_ids = []
+        for i in range(1000):
+            token_str = str(i)
+            token_ids = self._tokenizer.encode(token_str, add_bos=False, add_eos=False)
+            if len(token_ids) == 1:
+                numeric_token_ids.append(token_ids[0])
+            else:
+                # skip multi-token numbers
+                continue
+        print(len(numeric_token_ids))
+        numeric_token_ids = torch.tensor(numeric_token_ids, device=self._device)
+        numeric_values = torch.tensor([int(self._tokenizer.decode([i])) for i in numeric_token_ids], device=self._device)
+        assert all(isinstance(v.item(), int) for v in numeric_values)
+        
         # Probabilities over numeric tokens
         numeric_logits = logits[:, -1, numeric_token_ids]
         numeric_logits = torch.clamp(numeric_logits, min=-50, max=50)
