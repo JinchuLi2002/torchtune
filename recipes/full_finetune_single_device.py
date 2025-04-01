@@ -649,41 +649,81 @@ class FullFinetuneRecipeSingleDevice(FTRecipeInterface):
     #     del logits
 
     #     return loss
+    # def _loss_step(self, batch: Dict[str, torch.Tensor]) -> torch.Tensor:
+    #     numeric_labels = batch.pop("numeric_label")
+    #     labels = batch.pop("labels")
+
+    #     with self.activations_handling_ctx:
+    #         logits = self._model(**batch)
+
+    #     # Numeric tokens
+    #     numeric_tokens = [str(i) for i in range(1000)]
+    #     numeric_token_ids = torch.tensor(
+    #         [self._tokenizer.encode(token, add_bos=False, add_eos=False)[0] for token in numeric_tokens],
+    #         device=self._device
+    #     )
+    #     numeric_values = torch.arange(1000, device=self._device)
+
+    #     # Probabilities over numeric tokens
+    #     numeric_logits = logits[:, -1, numeric_token_ids]
+    #     numeric_probs = F.softmax(numeric_logits, dim=-1)
+    #     preds_numeric = torch.sum(numeric_probs * numeric_values, dim=-1)
+
+    #     # MSE Loss
+    #     mse = F.mse_loss(preds_numeric, numeric_labels.float())
+
+    #     # (1) Penalize if top token is not numeric
+    #     full_probs = F.softmax(logits[:, -1, :], dim=-1)
+    #     top_token = torch.argmax(full_probs, dim=-1)
+    #     is_numeric = torch.isin(top_token, numeric_token_ids)
+    #     non_numeric_penalty = (~is_numeric).float().mean()
+        
+    #     # (2) Penalize high entropy (flat distribution)
+    #     entropy = -torch.sum(numeric_probs * numeric_probs.log(), dim=-1).mean()
+
+    #     # Combine all
+    #     loss = mse + 0.5 * non_numeric_penalty + 0.1 * entropy
+    #     return loss
     def _loss_step(self, batch: Dict[str, torch.Tensor]) -> torch.Tensor:
         numeric_labels = batch.pop("numeric_label")
         labels = batch.pop("labels")
 
         with self.activations_handling_ctx:
-            logits = self._model(**batch)
+            logits = self._model(**batch)  # shape: (B, T, V)
 
-        # Numeric tokens
-        numeric_tokens = [str(i) for i in range(1000)]
-        numeric_token_ids = torch.tensor(
-            [self._tokenizer.encode(token, add_bos=False, add_eos=False)[0] for token in numeric_tokens],
-            device=self._device
-        )
-        numeric_values = torch.arange(1000, device=self._device)
+        # Only take logits of the last position
+        last_logits = logits[:, -1, :]  # shape: (B, V)
 
-        # Probabilities over numeric tokens
-        numeric_logits = logits[:, -1, numeric_token_ids]
+        # Cache these once during init instead of recreating every time
+        if not hasattr(self, "_numeric_token_ids"):
+            numeric_tokens = [str(i) for i in range(1000)]
+            self._numeric_token_ids = torch.tensor(
+                [self._tokenizer.encode(token, add_bos=False, add_eos=False)[0] for token in numeric_tokens],
+                device=self._device
+            )
+            self._numeric_values = torch.arange(1000, device=self._device)
+
+        numeric_logits = last_logits[:, self._numeric_token_ids]  # shape: (B, 1000)
         numeric_probs = F.softmax(numeric_logits, dim=-1)
-        preds_numeric = torch.sum(numeric_probs * numeric_values, dim=-1)
+        preds_numeric = torch.sum(numeric_probs * self._numeric_values, dim=-1)
 
-        # MSE Loss
+        # (1) MSE Loss
         mse = F.mse_loss(preds_numeric, numeric_labels.float())
 
-        # (1) Penalize if top token is not numeric
-        full_probs = F.softmax(logits[:, -1, :], dim=-1)
-        top_token = torch.argmax(full_probs, dim=-1)
-        is_numeric = torch.isin(top_token, numeric_token_ids)
+        # (2) Penalize if top token is non-numeric
+        # Avoid full softmax – just use argmax
+        top_token = torch.argmax(last_logits, dim=-1)
+        is_numeric = torch.isin(top_token, self._numeric_token_ids)
         non_numeric_penalty = (~is_numeric).float().mean()
 
-        # (2) Penalize high entropy (flat distribution)
-        entropy = -torch.sum(numeric_probs * numeric_probs.log(), dim=-1).mean()
+        # (3) Penalize high entropy (flat numeric distribution)
+        # Clamp to avoid log(0)
+        clamped_probs = numeric_probs.clamp(min=1e-8)
+        entropy = -torch.sum(clamped_probs * clamped_probs.log(), dim=-1).mean()
 
-        # Combine all
         loss = mse + 0.5 * non_numeric_penalty + 0.1 * entropy
         return loss
+
 
     def train(self) -> None:
         """
