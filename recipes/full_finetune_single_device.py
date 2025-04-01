@@ -679,7 +679,8 @@ class FullFinetuneRecipeSingleDevice(FTRecipeInterface):
         non_numeric_penalty = (~is_numeric).float().mean()
         
         # (2) Penalize high entropy (flat distribution)
-        entropy = -torch.sum(numeric_probs * numeric_probs.log(), dim=-1).mean()
+        eps = 1e-8  # small constant to avoid log(0)
+        entropy = -torch.sum(numeric_probs * (numeric_probs + eps).log(), dim=-1).mean()
 
         # Combine all
         loss = mse + 0.5 * non_numeric_penalty + 0.1 * entropy
