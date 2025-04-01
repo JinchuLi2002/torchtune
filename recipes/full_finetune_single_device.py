@@ -672,18 +672,19 @@ class FullFinetuneRecipeSingleDevice(FTRecipeInterface):
         # MSE Loss
         mse = F.mse_loss(preds_numeric, numeric_labels.float())
 
-        # (1) Penalize if top token is not numeric
-        full_probs = F.softmax(logits[:, -1, :], dim=-1)
-        top_token = torch.argmax(full_probs, dim=-1)
-        is_numeric = torch.isin(top_token, numeric_token_ids)
-        non_numeric_penalty = (~is_numeric).float().mean()
+        # # (1) Penalize if top token is not numeric
+        # full_probs = F.softmax(logits[:, -1, :], dim=-1)
+        # top_token = torch.argmax(full_probs, dim=-1)
+        # is_numeric = torch.isin(top_token, numeric_token_ids)
+        # non_numeric_penalty = (~is_numeric).float().mean()
         
-        # (2) Penalize high entropy (flat distribution)
-        eps = 1e-8  # small constant to avoid log(0)
-        entropy = -torch.sum(numeric_probs * (numeric_probs + eps).log(), dim=-1).mean()
+        # # (2) Penalize high entropy (flat distribution)
+        # eps = 1e-8  # small constant to avoid log(0)
+        # entropy = -torch.sum(numeric_probs * (numeric_probs + eps).log(), dim=-1).mean()
 
         # Combine all
-        loss = mse + 0.5 * non_numeric_penalty + 0.1 * entropy
+        #loss = mse + 0.5 * non_numeric_penalty + 0.1 * entropy
+        loss = mse
         return loss
     # def _loss_step(self, batch: Dict[str, torch.Tensor]) -> torch.Tensor:
     #     numeric_labels = batch.pop("numeric_label")
