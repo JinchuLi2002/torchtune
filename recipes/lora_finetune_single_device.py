@@ -572,10 +572,9 @@ class LoRAFinetuneRecipeSingleDevice(FTRecipeInterface):
             dataset=ds,
             shuffle=shuffle,
             batch_size=batch_size,
-            collate_fn=(collate_fn if not packed else padded_collate_packed),
+            collate_fn=collate_fn,
             drop_last=True,
         )
-
         if dataloader_state_dict is not None:
             dataloader.load_state_dict(dataloader_state_dict)
             # B/c we currently only save at epoch boundaries, if we cut the previous epoch short
