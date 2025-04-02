@@ -14,7 +14,8 @@ from warnings import warn
 import torch
 import torchtune.modules.common_utils as common_utils
 from omegaconf import DictConfig, ListConfig
-
+import csv
+import os
 from torch import nn
 from torch.optim import Optimizer
 from torchdata.stateful_dataloader import StatefulDataLoader
@@ -655,6 +656,9 @@ class LoRAFinetuneRecipeSingleDevice(FTRecipeInterface):
     #     loss = F.mse_loss(preds_numeric, numeric_labels.float())
 
     #     return loss
+
+
+
     def _loss_step(self, batch: Dict[str, torch.Tensor]) -> torch.Tensor:
         numeric_labels = batch.pop("numeric_label")
         labels = batch.pop("labels")
@@ -712,7 +716,7 @@ class LoRAFinetuneRecipeSingleDevice(FTRecipeInterface):
         """
         The core training loop adapted for numeric regression (RAFT).
         """
-
+        
         if self._compile:
             log.info(
                 "NOTE: torch.compile is enabled; expect a relatively slow first iteration."
@@ -726,7 +730,11 @@ class LoRAFinetuneRecipeSingleDevice(FTRecipeInterface):
         with self._profiler as prof:
             for curr_epoch in range(self.epochs_run, self.total_epochs):
                 pbar = tqdm(total=self._steps_per_epoch)
-                
+                output_dir = "output/superconductors_train_csv"
+                os.makedirs(output_dir, exist_ok=True)
+                train_csv_path = os.path.join(output_dir, f"train_epoch_{curr_epoch}.csv")
+
+                train_csv_rows = []
                 for idx, batch in enumerate(self._dataloader):
                     # CUDA memory profiling (unchanged)
                     if (
@@ -741,6 +749,40 @@ class LoRAFinetuneRecipeSingleDevice(FTRecipeInterface):
 
                     # Compute loss (RAFT numeric loss is per-sample)
                     current_loss = self._loss_step(batch)
+                    # For CSV logging
+                    numeric_labels = batch["numeric_label"].tolist()
+                    token_ids = batch["tokens"]
+
+                    with torch.no_grad():
+                        logits = self._model(**{k: v for k, v in batch.items() if k not in ['labels', 'numeric_label']})
+                        numeric_tokens = [str(i) for i in range(1000)]
+                        numeric_token_ids = torch.tensor(
+                            [self._tokenizer.encode(token, add_bos=False, add_eos=False)[0] for token in numeric_tokens],
+                            device=self._device
+                        )
+                        numeric_values = torch.arange(1000, device=self._device)
+                        numeric_logits = logits[:, -1, numeric_token_ids]
+                        numeric_probs = F.softmax(numeric_logits, dim=-1)
+                        preds_numeric = torch.sum(numeric_probs * numeric_values, dim=-1).tolist()
+
+                        for i in range(len(preds_numeric)):
+                            input_tokens = token_ids[i].tolist()
+                            decoded_text = self._tokenizer.decode(input_tokens).strip()
+
+                            # Split user and assistant
+                            if "\n" in decoded_text:
+                                user_part, assistant_part = decoded_text.rsplit("\n", 1)
+                            else:
+                                user_part = decoded_text
+                                assistant_part = ""
+
+                            train_csv_rows.append({
+                                "ground_truth": numeric_labels[i],
+                                "prediction": round(preds_numeric[i], 2),
+                                "user": user_part,
+                                "assistant": assistant_part,
+                            })
+
                     batch_size = batch["tokens"].size(0)  # RAFT loss is batch-sized
                     running_loss += current_loss.item() * batch_size
                     num_samples += batch_size
@@ -823,6 +865,13 @@ class LoRAFinetuneRecipeSingleDevice(FTRecipeInterface):
                 start_save_checkpoint = time.perf_counter()
                 log.info("Starting checkpoint save...")
                 self.save_checkpoint(epoch=curr_epoch)
+                with open(train_csv_path, "w", newline="", encoding="utf-8") as f:
+                    writer = csv.DictWriter(f, fieldnames=["ground_truth", "prediction", "user", "assistant"])
+                    writer.writeheader()
+                    writer.writerows(train_csv_rows)
+
+                log.info(f"Saved training CSV for epoch {curr_epoch} to: {train_csv_path}")
+
                 log.info(
                     "Checkpoint saved in {:.2f} seconds.".format(
                         time.perf_counter() - start_save_checkpoint
