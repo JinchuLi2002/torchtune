@@ -681,8 +681,14 @@ class LoRAFinetuneRecipeSingleDevice(FTRecipeInterface):
         # (1) Penalize if top token is not numeric
         full_probs = F.softmax(logits[:, -1, :], dim=-1)
         top_token = torch.argmax(full_probs, dim=-1)
-        is_numeric = torch.isin(top_token, numeric_token_ids)
-        non_numeric_penalty = (~is_numeric).float().mean()
+        # Compute full softmax over vocab
+        full_probs = F.softmax(logits[:, -1, :], dim=-1)
+
+        # Total probability mass assigned to numeric tokens
+        numeric_mass = full_probs[:, numeric_token_ids].sum(dim=-1)
+
+        # 1 - numeric mass = mass assigned to non-numeric tokens
+        non_numeric_penalty = (1.0 - numeric_mass).mean()
 
         # (2) Penalize high entropy (flat distribution)
         entropy = -torch.sum(numeric_probs * numeric_probs.log(), dim=-1).mean()
