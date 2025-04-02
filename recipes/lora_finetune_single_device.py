@@ -518,7 +518,7 @@ class LoRAFinetuneRecipeSingleDevice(FTRecipeInterface):
 
         log.info("Learning rate scheduler is initialized.")
         return lr_scheduler
-    def raft_collate_fn_closure(padding_idx):
+    def raft_collate_fn_closure(self, padding_idx):
         def fn(batch):
             tokens = [sample["tokens"] for sample in batch]
             labels = [sample["labels"] for sample in batch]
