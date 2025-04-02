@@ -518,6 +518,26 @@ class LoRAFinetuneRecipeSingleDevice(FTRecipeInterface):
 
         log.info("Learning rate scheduler is initialized.")
         return lr_scheduler
+    def raft_collate_fn(batch, padding_idx: int):
+        # Extract fields
+        tokens = [sample["tokens"] for sample in batch]
+        labels = [sample["labels"] for sample in batch]
+        numeric_labels = [sample["numeric_label"] for sample in batch]
+
+        # Pad to longest sequence
+        max_len = max(len(t) for t in tokens)
+        padded_tokens = [
+            t + [padding_idx] * (max_len - len(t)) for t in tokens
+        ]
+        padded_labels = [
+            l + [-100] * (max_len - len(l)) for l in labels
+        ]
+
+        return {
+            "tokens": torch.tensor(padded_tokens, dtype=torch.long),
+            "labels": torch.tensor(padded_labels, dtype=torch.long),
+            "numeric_label": torch.tensor(numeric_labels, dtype=torch.float),
+        }
 
     def _setup_data(
         self,
@@ -546,7 +566,7 @@ class LoRAFinetuneRecipeSingleDevice(FTRecipeInterface):
         # Instantiate collate_fn
         if "left_pad_sequence" in collate_fn:
             raise RuntimeError("left_pad_sequence collator is only for inference.")
-        collate_fn = _get_component_from_path(collate_fn)
+        collate_fn = partial(self.raft_collate_fn, padding_idx=self._tokenizer.pad_id)
 
         dataloader = StatefulDataLoader(
             dataset=ds,
