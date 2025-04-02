@@ -677,7 +677,8 @@ class LoRAFinetuneRecipeSingleDevice(FTRecipeInterface):
         #labels = batch["labels"]
 
         with self.activations_handling_ctx:
-            logits = self._model(**batch)
+            #logits = self._model(**batch)
+            logits = self._model(**{k: v for k, v in batch.items() if k not in ["numeric_label", "labels"]})
 
         # Numeric tokens
         numeric_tokens = [str(i) for i in range(1000)]
