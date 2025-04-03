@@ -720,7 +720,7 @@ class LoRAFinetuneRecipeSingleDevice(FTRecipeInterface):
 
         print(f"[DEBUG] preds_numeric: {preds_numeric.tolist()} | target: {numeric_labels.tolist()} | mse: {mse.item():.4f}")
         print(f"[DEBUG] top token ids: {top_token_ids.tolist()} | decoded: {top_tokens_str}")
-        print(f'[DEBUG] numeric penalty: {non_numeric_penalty.item():.4f} | entropy: {entropy.item():.4f}')
+        print(f'[DEBUG] numeric penalty: {non_numeric_penalty.item():.4f} | entropy: {entropy.item():.4f} | loss contribution: {1000000 * (non_numeric_penalty ** 2):.4f}')
         # Combine all
         loss = mse + 1000000 * (non_numeric_penalty ** 2) # + 10000 * entropy
         return loss
