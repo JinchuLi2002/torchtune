@@ -688,16 +688,14 @@ class LoRAFinetuneRecipeSingleDevice(FTRecipeInterface):
         )
         numeric_values = torch.arange(1000, device=self._device)
 
-        # Probabilities over numeric tokens
-        numeric_logits = logits[:, -1, numeric_token_ids]
-        numeric_probs = F.softmax(numeric_logits, dim=-1)
+        full_probs = F.softmax(logits[:, -1, :], dim=-1)
+        numeric_probs = full_probs[:, numeric_token_ids]  # slice out numeric tokens
         preds_numeric = torch.sum(numeric_probs * numeric_values, dim=-1)
 
         # MSE Loss
         mse = F.mse_loss(preds_numeric, numeric_labels.float())
 
         # (1) Penalize if top token is not numeric
-        full_probs = F.softmax(logits[:, -1, :], dim=-1)
         top_token = torch.argmax(full_probs, dim=-1)
         # Compute full softmax over vocab
         full_probs = F.softmax(logits[:, -1, :], dim=-1)
@@ -718,7 +716,7 @@ class LoRAFinetuneRecipeSingleDevice(FTRecipeInterface):
         # Decode top tokens
         top_tokens_str = [self._tokenizer.decode([tid.item()]).strip() for tid in top_token_ids]
 
-        loss = mse + 1000000 * (non_numeric_penalty ** 2) # + 10000 * entropy
+        loss = mse #+ 1000000 * (non_numeric_penalty ** 2) # + 10000 * entropy
         print(f"[DEBUG] preds_numeric: {preds_numeric.tolist()} | target: {numeric_labels.tolist()} | mse: {mse.item():.4f}")
         print(f"[DEBUG] top token ids: {top_token_ids.tolist()} | decoded: {top_tokens_str}")
         print(f'[DEBUG] numeric penalty: {non_numeric_penalty.item():.4f} | entropy: {entropy.item():.4f} | loss contribution: {1000000 * (non_numeric_penalty ** 2):.4f} | total loss: {loss.item():.4f}')
