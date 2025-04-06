@@ -688,9 +688,7 @@ class LoRAFinetuneRecipeSingleDevice(FTRecipeInterface):
         )
         numeric_values = torch.arange(1000, device=self._device)
 
-        #full_probs = F.softmax(logits[:, -1, :], dim=-1)
-        logit_scale = 5.0  # Try values: 2.0, 5.0, 10.0
-        full_probs = F.softmax(logits[:, -1, :] * logit_scale, dim=-1)
+        full_probs = F.softmax(logits[:, -1, :], dim=-1)
         numeric_probs = full_probs[:, numeric_token_ids]  # slice out numeric tokens
         preds_numeric = torch.sum(numeric_probs * numeric_values, dim=-1)
 
@@ -719,7 +717,8 @@ class LoRAFinetuneRecipeSingleDevice(FTRecipeInterface):
         # Decode top tokens
         top_tokens_str = [self._tokenizer.decode([tid.item()]).strip() for tid in top_token_ids]
 
-        loss = mse #+ 1000000 * (non_numeric_penalty ** 2) # + 10000 * entropy
+        #loss = mse #+ 1000000 * (non_numeric_penalty ** 2) # + 10000 * entropy
+        loss = mse + 1000 * (entropy ** 2)
         print(f"[DEBUG] preds_numeric: {preds_numeric.tolist()} | target: {numeric_labels.tolist()} | mse: {mse.item():.4f}")
         print(f"[DEBUG] top token ids: {top_token_ids.tolist()} | decoded: {top_tokens_str}")
         print(f'[DEBUG] numeric penalty: {non_numeric_penalty.item():.4f} | entropy: {entropy.item():.4f} | loss contribution: {1000000 * (non_numeric_penalty ** 2):.4f} | total loss: {loss.item():.4f}')
