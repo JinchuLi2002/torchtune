@@ -690,9 +690,6 @@ class LoRAFinetuneRecipeSingleDevice(FTRecipeInterface):
 
         full_probs = F.softmax(logits[:, -1, :], dim=-1)
         numeric_probs = full_probs[:, numeric_token_ids]  # slice out numeric tokens
-        # preds_numeric = torch.sum(numeric_probs * numeric_values, dim=-1)
-
-        numeric_probs = numeric_probs / numeric_probs.sum(dim=-1, keepdim=True)
         preds_numeric = torch.sum(numeric_probs * numeric_values, dim=-1)
 
 
