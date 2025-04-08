@@ -715,13 +715,13 @@ class LoRAFinetuneRecipeSingleDevice(FTRecipeInterface):
         top_tokens_str = [self._tokenizer.decode([tid.item()]).strip() for tid in top_token_ids]
 
         numeric_ce_loss = F.cross_entropy(logits[:, -1, numeric_token_ids], numeric_labels.long())
-        loss = mae + 0.1 * numeric_ce_loss
+        loss = mae + 2 * numeric_ce_loss
 
         #loss = mae #+ 1000000 * (non_numeric_penalty ** 2)
         #print(f"[DEBUG] preds_numeric: {preds_numeric.tolist()} | target: {numeric_labels.tolist()} | mse: {mse.item():.4f}")
         print(f"[DEBUG] preds_numeric: {preds_numeric.tolist()} | target: {numeric_labels.tolist()} | mae: {mae.item():.4f}")
         print(f"[DEBUG] top token ids: {top_token_ids.tolist()} | decoded: {top_tokens_str}")
-        print(f'[DEBUG] numeric penalty: {non_numeric_penalty.item():.4f} | entropy: {entropy.item():.4f}  | CE Loss con: {numeric_ce_loss*0.1} | total loss: {loss.item():.4f}')
+        print(f'[DEBUG] numeric penalty: {non_numeric_penalty.item():.4f} | entropy: {entropy.item():.4f}  | CE Loss con: {numeric_ce_loss*2} | total loss: {loss.item():.4f}')
         # Combine all
         return loss
 
