@@ -690,13 +690,7 @@ class LoRAFinetuneRecipeSingleDevice(FTRecipeInterface):
 
         full_probs = F.softmax(logits[:, -1, :], dim=-1)
         numeric_probs = full_probs[:, numeric_token_ids]  # slice out numeric tokens
-        #preds_numeric = torch.sum(numeric_probs * numeric_values, dim=-1)
-
-        self.numeric_weights = torch.nn.Parameter(torch.arange(1000, device=self._device).float())
-
-        # loss step
-        preds_numeric = torch.sum(numeric_probs * self.numeric_weights, dim=-1)
-
+        preds_numeric = torch.sum(numeric_probs * numeric_values, dim=-1)
 
 
         # MSE Loss
