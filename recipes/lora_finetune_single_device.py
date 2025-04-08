@@ -714,7 +714,7 @@ class LoRAFinetuneRecipeSingleDevice(FTRecipeInterface):
         # Decode top tokens
         top_tokens_str = [self._tokenizer.decode([tid.item()]).strip() for tid in top_token_ids]
 
-        numeric_ce_loss = F.cross_entropy(logits[:, -1, numeric_token_ids], numeric_labels)
+        numeric_ce_loss = F.cross_entropy(logits[:, -1, numeric_token_ids], numeric_labels.long())
         loss = mae + 0.1 * numeric_ce_loss
 
         #loss = mae #+ 1000000 * (non_numeric_penalty ** 2)
