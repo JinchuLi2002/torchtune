@@ -34,7 +34,7 @@ from torchtune.modules.peft import (
 )
 from torchtune.recipe_interfaces import FTRecipeInterface
 from torchtune.training import DummyProfiler, PROFILER_KEY
-
+import math
 from tqdm import tqdm
 
 log = utils.get_logger("DEBUG")
@@ -727,14 +727,20 @@ class LoRAFinetuneRecipeSingleDevice(FTRecipeInterface):
         #loss = mae + 0.8 * numeric_ce_loss + 0.1 * entropy
         current_epoch = self.epochs_run
 
-        if current_epoch < 10:
-            ce_weight = 10.0
-        else:
-            ce_weight = 0.2
+        # # Example parameters (tune as desired)
+        max_ce_weight = 10.0
+        min_ce_weight = 0.2
+        transition_mid_epoch = 10
+        transition_sharpness = 1.0  # smaller=slower transition
 
-        mae_weight = 1.0
+        epoch = self.epochs_run
 
-        loss = mae_weight * mae + ce_weight * numeric_ce_loss 
+        # Sigmoid schedule for smooth transition
+        ce_weight = min_ce_weight + (max_ce_weight - min_ce_weight) / (
+            1 + math.exp((epoch - transition_mid_epoch) * transition_sharpness)
+        )
+
+        loss = mae + ce_weight * numeric_ce_loss 
 
         #loss = mae #+ 1000000 * (non_numeric_penalty ** 2)
         #print(f"[DEBUG] preds_numeric: {preds_numeric.tolist()} | target: {numeric_labels.tolist()} | mse: {mse.item():.4f}")
