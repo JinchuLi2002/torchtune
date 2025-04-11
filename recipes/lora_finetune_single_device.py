@@ -727,12 +727,10 @@ class LoRAFinetuneRecipeSingleDevice(FTRecipeInterface):
         #loss = mae + 0.8 * numeric_ce_loss + 0.1 * entropy
         current_epoch = self.epochs_run
 
-        if current_epoch < 5:
-            ce_weight = 3.0
-        elif current_epoch < 10:
-            ce_weight = 1.0
+        if current_epoch < 8:
+            ce_weight = 10.0
         else:
-            ce_weight = 0.2
+            ce_weight = 0
 
         loss = mae + ce_weight * numeric_ce_loss  
 
