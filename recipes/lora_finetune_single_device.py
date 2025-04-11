@@ -694,7 +694,7 @@ class LoRAFinetuneRecipeSingleDevice(FTRecipeInterface):
 
 
         # MSE Loss
-        #mse = F.mse_loss(preds_numeric, numeric_labels.float())
+        mse = F.mse_loss(preds_numeric, numeric_labels.float())
         mae = F.l1_loss(preds_numeric, numeric_labels.float())
 
         # (1) Penalize if top token is not numeric
@@ -725,14 +725,21 @@ class LoRAFinetuneRecipeSingleDevice(FTRecipeInterface):
         numeric_ce_loss = F.cross_entropy(logits[:, -1, numeric_token_ids], numeric_label_indices)
         #loss = mae + 0.8 * numeric_ce_loss
         #loss = mae + 0.8 * numeric_ce_loss + 0.1 * entropy
+
+        # total_epochs = 20   lr: 5e-4 wandb run 236
         current_epoch = self.epochs_run
 
-        if current_epoch < 8:
+        if current_epoch < 5:
+            ce_weight = 30.0 # or is it 2
+        elif current_epoch < 10:
             ce_weight = 10.0
         else:
             ce_weight = 0
 
-        loss = mae + ce_weight * numeric_ce_loss  
+        mae_weight = 1.0
+
+        loss = mae_weight * mse + ce_weight * numeric_ce_loss
+
 
         #loss = mae #+ 1000000 * (non_numeric_penalty ** 2)
         #print(f"[DEBUG] preds_numeric: {preds_numeric.tolist()} | target: {numeric_labels.tolist()} | mse: {mse.item():.4f}")
