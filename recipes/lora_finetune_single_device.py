@@ -743,7 +743,8 @@ class LoRAFinetuneRecipeSingleDevice(FTRecipeInterface):
             label_smoothing=0.1
         )
 
-        loss = mae_weight * mae + ce_weight * numeric_ce_loss
+        #loss = mae_weight * mae + ce_weight * numeric_ce_loss
+        loss = numeric_ce_loss
 
 
         #loss = mae #+ 1000000 * (non_numeric_penalty ** 2)
