@@ -741,8 +741,8 @@ class LoRAFinetuneRecipeSingleDevice(FTRecipeInterface):
         entropy_weight = 0.01
         numeric_ce_loss = F.cross_entropy(
             logits[:, -1, numeric_token_ids],
-            numeric_labels.long(),
-            label_smoothing=0.1  # important!
+            numeric_label_indices,
+            label_smoothing=0.1
         )
 
         loss = mae_weight * mae + ce_weight * numeric_ce_loss
