@@ -759,6 +759,11 @@ class LoRAFinetuneRecipeSingleDevice(FTRecipeInterface):
 
         # Compute KL divergence loss
         kl_loss = F.kl_div(log_probs, gaussian_target, reduction='batchmean')
+        numeric_ce_loss = F.cross_entropy(
+            logits[:, -1, numeric_token_ids],
+            numeric_label_indices,
+            label_smoothing=0.1
+        )
         loss = ce_weight * kl_loss
 
 
