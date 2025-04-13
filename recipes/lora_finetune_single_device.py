@@ -737,15 +737,29 @@ class LoRAFinetuneRecipeSingleDevice(FTRecipeInterface):
         else:
             ce_weight = 0.1
 
-        mae_weight = 1.0
-        entropy_weight = 0.01
-        numeric_ce_loss = F.cross_entropy(
-            logits[:, -1, numeric_token_ids],
-            numeric_label_indices,
-            label_smoothing=0.1
-        )
+        logits_slice = logits[:, -1, numeric_token_ids]  # shape: [batch, num_classes]
+        log_probs = F.log_softmax(logits_slice, dim=-1)  # log-probabilities
 
-        loss = mae_weight * mae + ce_weight * numeric_ce_loss
+        # Create Gaussian target distribution
+        batch_size = numeric_labels.size(0)
+        num_classes = logits_slice.size(1)
+
+        # Prepare class indices
+        class_indices = torch.arange(num_classes, device=logits.device).unsqueeze(0).expand(batch_size, -1)
+
+        # Target labels mapped to class indices
+        target_indices = numeric_label_indices.unsqueeze(1)
+
+        # Compute Gaussian target distribution
+        sigma = 2.0  # control sharpness of distribution
+        gaussian_target = torch.exp(-0.5 * ((class_indices - target_indices) / sigma) ** 2)
+
+        # Normalize to get valid probability distribution
+        gaussian_target = gaussian_target / gaussian_target.sum(dim=1, keepdim=True)
+
+        # Compute KL divergence loss
+        kl_loss = F.kl_div(log_probs, gaussian_target, reduction='batchmean')
+        loss = ce_weight * kl_loss
 
 
         #loss = mae #+ 1000000 * (non_numeric_penalty ** 2)
