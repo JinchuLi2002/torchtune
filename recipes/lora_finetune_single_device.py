@@ -730,12 +730,12 @@ class LoRAFinetuneRecipeSingleDevice(FTRecipeInterface):
         current_epoch = self.epochs_run
 
         #lora rank 4, 4e-5 lr
-        if current_epoch < 5:
-            ce_weight = 2.0
-        elif current_epoch < 10:
-            ce_weight = 0.5
-        else:
-            ce_weight = 0.1
+        # if current_epoch < 5:
+        #     ce_weight = 2.0
+        # elif current_epoch < 10:
+        #     ce_weight = 0.5
+        # else:
+        #     ce_weight = 0.1
 
         logits_slice = logits[:, -1, numeric_token_ids]  # shape: [batch, num_classes]
         log_probs = F.log_softmax(logits_slice, dim=-1)  # log-probabilities
