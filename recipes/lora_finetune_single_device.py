@@ -774,7 +774,7 @@ class LoRAFinetuneRecipeSingleDevice(FTRecipeInterface):
 
         mae_weight = 1.0
 
-        loss = mae_weight * mse + ce_weight * numeric_ce_loss
+        loss = mae_weight * mae + ce_weight * numeric_ce_loss
 
 
 
