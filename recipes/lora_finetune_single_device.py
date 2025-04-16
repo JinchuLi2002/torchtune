@@ -764,6 +764,7 @@ class LoRAFinetuneRecipeSingleDevice(FTRecipeInterface):
             numeric_label_indices,
             label_smoothing=0.1
         )
+
         if current_epoch < 5:
             ce_weight = 10.0 # or is it 2
         elif current_epoch < 10:
@@ -773,8 +774,8 @@ class LoRAFinetuneRecipeSingleDevice(FTRecipeInterface):
 
         mae_weight = 1.0
 
-        # loss = mae_weight * mae + ce_weight * numeric_ce_loss
-        loss = mae_weight * mae + ce_weight * kl_loss
+        loss = mae_weight * mse + ce_weight * numeric_ce_loss
+
 
 
         #loss = mae #+ 1000000 * (non_numeric_penalty ** 2)
