@@ -766,7 +766,7 @@ class LoRAFinetuneRecipeSingleDevice(FTRecipeInterface):
         )
 
         if current_epoch < 5:
-            ce_weight = 10.0 # or is it 2
+            ce_weight = 5 # or is it 2
         elif current_epoch < 10:
             ce_weight = 0.8
         else:
