@@ -772,7 +772,8 @@ class LoRAFinetuneRecipeSingleDevice(FTRecipeInterface):
 
         mae_weight = 1.0
 
-        loss = mae_weight * mae + ce_weight * numeric_ce_loss #ce_weight * kl_loss 
+        #loss = mae_weight * mae + ce_weight * numeric_ce_loss #ce_weight * kl_loss 
+        loss = mae
 
         #loss = mae #+ 1000000 * (non_numeric_penalty ** 2)
         #print(f"[DEBUG] preds_numeric: {preds_numeric.tolist()} | target: {numeric_labels.tolist()} | mse: {mse.item():.4f}")
