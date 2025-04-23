@@ -772,13 +772,13 @@ class LoRAFinetuneRecipeSingleDevice(FTRecipeInterface):
 
         mae_weight = 1.0
 
-        loss = mae_weight * mae + ce_weight * kl_loss
+        loss = mae_weight * mae + ce_weight * numeric_ce_loss #ce_weight * kl_loss 
 
         #loss = mae #+ 1000000 * (non_numeric_penalty ** 2)
         #print(f"[DEBUG] preds_numeric: {preds_numeric.tolist()} | target: {numeric_labels.tolist()} | mse: {mse.item():.4f}")
         print(f"[DEBUG] preds_numeric: {preds_numeric.tolist()} | target: {numeric_labels.tolist()} | mae: {mae.item():.4f}")
         print(f"[DEBUG] top token ids: {top_token_ids.tolist()} | decoded: {top_tokens_str}")
-        print(f'[DEBUG] numeric penalty: {non_numeric_penalty.item():.4f} | entropy: {entropy.item():.4f}  | KL: {kl_loss} | MAE: {mae} | total loss: {loss.item():.4f}')
+        print(f'[DEBUG] numeric penalty: {non_numeric_penalty.item():.4f} | entropy: {entropy.item():.4f}  | KL: {kl_loss} | CE: {numeric_ce_loss}| MAE: {mae} | total loss: {loss.item():.4f}')
         # Combine all
         return loss
 
