@@ -46,7 +46,7 @@ def load_custom_loss_function(path):
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod.loss_step
-loss_path = "../../LLM_datamine/configs/loss.py"
+loss_path = "./configs/loss.py"
 loss_step = load_custom_loss_function(loss_path)
 
 class LoRAFinetuneRecipeSingleDevice(FTRecipeInterface):
