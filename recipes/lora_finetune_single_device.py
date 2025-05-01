@@ -830,7 +830,7 @@ class LoRAFinetuneRecipeSingleDevice(FTRecipeInterface):
 
                     # Compute loss (RAFT numeric loss is per-sample)
                     #current_loss = self._loss_step(batch)
-                    current_loss = loss_step(self._model, batch, self._tokenizer, self._device, curr_epoch)
+                    current_loss = loss_step(self._model, batch, self._tokenizer, self._device, curr_epoch, self.activations_handling_ctx)
                     # For CSV logging
                     numeric_labels = batch["numeric_label"].tolist()
                     token_ids = batch["tokens"]
