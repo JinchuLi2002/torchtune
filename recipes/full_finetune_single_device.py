@@ -658,9 +658,25 @@ class FullFinetuneRecipeSingleDevice(FTRecipeInterface):
 
         numeric_tokens = [str(i) for i in range(1000)]
         numeric_token_ids = torch.tensor(
-            [self._tokenizer.encode(token, add_bos=False, add_eos=False)[0] for token in numeric_tokens],
+            [self._tokenizer.encode(token, add_bos=False, add_eos=False)[0]   # first sub-token only
+            for token in numeric_tokens],
             device=self._device
         )
+
+        # ─── DUPLICATE-CHECK ─────────────────────────────────────────────
+        unique_ids = set(numeric_token_ids.tolist())
+        if len(unique_ids) < len(numeric_token_ids):
+            dup_cnt = len(numeric_token_ids) - len(unique_ids)
+            print(f"[WARN] numeric_token_ids contains {dup_cnt} duplicate IDs "
+                f"({len(unique_ids)} unique / {len(numeric_token_ids)} total). "
+                "This usually means many numbers are tokenised into multi-piece "
+                "sub-tokens and only the first piece is being kept.")
+            # optional: show which IDs are duplicated
+            from collections import Counter
+            counts = Counter(numeric_token_ids.tolist())
+            dups   = {tid: c for tid, c in counts.items() if c > 1}
+            print("         Most frequent duplicate IDs (id: count):",
+                sorted(dups.items(), key=lambda x: -x[1])[:10])
         numeric_values = torch.arange(1000, device=self._device)
 
         full_probs = F.softmax(logits[:, -1, :], dim=-1)
